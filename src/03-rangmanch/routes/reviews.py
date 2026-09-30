@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, HTTPException
 from sqlmodel import Session, select, func
 from fastapi import Depends  # used for dependency injection (e.g. DB session)
 from models import Review, ReviewCreate, ReviewRead, ReviewUpdate  # SQLModel schemas
@@ -52,3 +52,49 @@ async def list_reviews(
     query = query.offset(skip).limit(limit)
     result = session.exec(query)
     return result.all()
+
+
+@router.get("/average/{play_name}", response_model=ReviewRead)
+async def average_review(play_name: str, session: Session = Depends(get_session)):
+    """
+    Retrieve the average review for a specific play.
+    """
+    result = session.exec(
+        select(func.avg(Review.rating), func.count(Review.rating)).where(
+            Review.play_name == play_name
+        )
+    ).first()
+    avg_rating, total_reviews = result
+
+    if total_reviews == 0:
+        raise HTTPException(status_code=404, detail="No reviews found for this play")
+    return {"play_name": play_name, "rating": avg_rating, "count": total_reviews}
+
+
+@router.get("/{review_id}", response_model=int)
+async def get_review(review_id: int, session: Session = Depends(get_session)):
+    """
+    Retrieve a specific review by its ID.
+    """
+    review = session.get(Review, review_id)
+    if not review:
+        raise HTTPException(status_code=404, detail="Review not found")
+    return review.id
+
+
+@router.patch("/{review_id}", response_model=ReviewRead)
+def update_review(
+    review_id: int, update: ReviewCreate, session: Session = Depends(get_session)
+):
+    """
+    Update a specific review by its ID.
+    """
+    db_review = session.get(Review, review_id)
+    if not db_review:
+        raise HTTPException(status_code=404, detail="Review not found")
+    for key, value in update.model_dump().items():
+        setattr(db_review, key, value)
+    session.add(db_review)
+    session.commit()
+    session.refresh(db_review)
+    return db_review
